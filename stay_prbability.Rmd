@@ -1,0 +1,192 @@
+---
+title: "stay probability"
+author: "Paris.N"
+date: "12/12/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+#1-libraries
+library(tidyverse)
+library(broom)
+library(knitr)
+library(kableExtra)
+library(R.matlab)
+library(data.table)
+library(formattable)
+library(webshot)
+library(here)
+make_z <- function(x){        #Using a function to compute z for outliers
+  (x - mean(x, na.rm = TRUE)) / sd(x, na.rm = TRUE)
+}
+```
+
+
+```{r}
+#2-data frame for "SELF" stay probability
+num_sub <- 36
+subject_id <-  
+  c(1,2,3,4,5,6,7,8,10,
+    11,12,13,14,15,16,18,19,20,
+    21,22,23,24,25,26,27,28,29,30,
+    31,32,33,34,35,36,37,38)
+pre_self <- "my_data/subject_"
+stay_mat_self <- matrix(nrow = num_sub, ncol = 4)
+stay.data.frame.self = data.frame(id = character(),
+                                  stay_prob = double(), 
+                                  stimulus = character(), 
+                                  outcome_valence = character(), 
+                                  beneficiary = character())
+st_dat <- data.frame( id = character(),
+                      sam_rew =  double(),
+                      st_sam_rew =  double(),
+                      w_a = double(),
+                      sam_pun = double(),
+                      st_sam_pun =  double(),
+                      x_b = double(), 
+                      dif_rew = double(),
+                      st_dif_rew =  double(),
+                      y_c = double(),
+                      dif_pun = double(),
+                      st_dif_pun = double(),
+                      z_d = double()
+)
+for (n in 1:num_sub){
+  sub <- subject_id[n]
+  #dir self
+  dir_self <- paste(pre_self,sub,"/data.mat", sep ="") 
+  subject <- readMat(dir_self)
+  #choice self
+  ch <- subject$data[, , 1]$choice
+  ind_choice <- which(ch!=0)
+  choice <- ch[ind_choice]
+  len <- length(choice)
+  len_1 <- length(choice)-1
+  #reward self
+  rew <- subject$data[, , 1]$reward
+  reward <- rew[ind_choice]
+  new_reward <-reward[1:len]
+  #state
+  st <- subject$data[, , 1]$state1
+  state <- st[ind_choice]
+  #stay self
+  stay <- (choice[1:(length(choice)-1)]) == choice[2:len]
+  #transition
+  trans <- (state[1:(length(state)-1)]) == state[2:len]
+  #calculating stay prob self
+  a <- 0 ; b <- 0 ; c <- 0 ; d <- 0 ; w=0 ; y=0 ; x=0 ; z=0
+  for(i in 1:len_1){
+    if (reward[i] >= 0.5){
+      new_reward[i] = 2 #outcome = reward : 
+      #a number between 1 to 5 showed to subject
+    } else{
+      new_reward[i] = 1 #outcome = punishment : 
+      #a number between 0 to -4 showed to subject
+    }
+    if (trans[i] == TRUE && new_reward[i] == 2){ #same_reward : 
+      #the previous options were showed to subject from which subject received 
+      #the reward in the previous trial.
+      if (stay[i] == TRUE){ # : the subject repeat the previous choice 
+        a = a + 1
+        w = w + 1
+      }
+      else{
+        a = a + 1
+      }
+    }
+    else if (trans[i] == TRUE && new_reward[i] == 1){ #same_punishment
+      if (stay[i] == TRUE){
+        b = b + 1
+        x= x + 1
+      }
+      else {
+        b = b + 1
+      }
+    }
+    else if (trans[i] == FALSE && new_reward[i] == 2){ #different_reward
+      if (stay[i] == TRUE){
+        c = c + 1
+        y = y + 1
+      }
+      else {
+        c = c + 1
+      }
+    }
+    else if (trans[i] == FALSE && new_reward[i] == 1){ #different_punishment
+      if (stay[i] == TRUE){
+        d = d + 1
+        z = z + 1
+      }
+      else {
+        d = d + 1
+      }
+    }
+  }
+  this_st_dat <- data.frame(  id = sub,
+                             sam_rew = a,
+                             st_sam_rew = w,
+                             w_a = round((w / a),digits = 3),
+                             sam_pun = b,
+                             st_sam_pun = x,
+                             x_b = round((x / b),digits = 3),
+                             dif_rew = c,
+                             st_dif_rew = y,
+                             y_c = round((y / c),digits = 3),
+                             dif_pun = d,
+                             st_dif_pun = z,
+                             z_d = round((z / d),digits = 3)
+  )
+  st_dat[nrow(st_dat)+1,] <- this_st_dat
+  # creating data.frame
+  same_rew <- data.frame(id = sub, 
+                         stay_prob = round((w / a),digits = 3), 
+                         stimulus = "same", 
+                         outcome_valence = "reward", 
+                         beneficiary = "self")
+  same_punish <- data.frame(sub, 
+                            stay_prob = round((x / b),digits = 3), 
+                            stimulus = "same", 
+                            outcome_valence = "punishment", 
+                            beneficiary = "self")
+  same_rew[nrow(same_rew) + 1, ] <- same_punish
+  diff_rew  <- data.frame(sub, 
+                          stay_prob = round((y / c),digits = 3), 
+                          stimulus = "different", 
+                          outcome_valence = "reward", 
+                          beneficiary = "self")
+  same_rew[nrow(same_rew) + 1, ] <- diff_rew
+  diff_punish <- data.frame(sub, 
+                            stay_prob = round((z / d),digits = 3), 
+                            stimulus = "different", 
+                            outcome_valence = "punishment", 
+                            beneficiary = "self")
+  same_rew[nrow(same_rew) + 1, ] <- diff_punish
+  nRow  <-  nrow(stay.data.frame.self)
+  stay.data.frame.self[(nRow+1):(nRow+4), ] = same_rew
+  
+  #matix of result
+  stay_mat_self[n, 1] <- round((w / a),digits = 3)
+  stay_mat_self[n, 2] <- round((x / b),digits = 3)
+  stay_mat_self[n, 3] <- round((y / c),digits = 3)
+  stay_mat_self[n, 4] <- round((z / d),digits = 3)
+  
+}
+stay.data.frame.self
+#---------------------------------------------------------------------- Outliers
+out_stay.dat.self <- stay.data.frame.self
+out_stay.dat.self <- out_stay.dat.self %>% 
+  dplyr::mutate(
+    stay_prob_z = make_z(out_stay.dat.self$stay_prob)
+  )
+#Using standardized scores to detect outliers  
+out_stay.dat.self %>% 
+  dplyr::filter_at(
+    vars(stay_prob_z),
+    any_vars(. >= 2.58)
+  )
+
+```

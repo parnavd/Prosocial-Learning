@@ -1,0 +1,634 @@
+---
+title: "regression"
+author: "Paris.N"
+date: "12/12/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+#libraries
+library(tidyverse)
+library(kableExtra)
+library(R.matlab)
+library(data.table)
+library(formattable)
+library(webshot)
+library(here)
+library(qqplotr)
+library(pwr)
+library(lme4)
+make_z <- function(x){        #Using a function to compute z
+  (x - mean(x, na.rm = TRUE)) / sd(x, na.rm = TRUE)
+}
+```
+
+```{r}
+#data frame for _____"SELF"_____ stay probability
+
+#---------------------------------------------------------- define the variables
+num_sub <- 36
+subject_id <-  
+  c(1,2,3,4,5,6,7,8,10,
+    11,12,13,14,15,16,18,19,20,
+    21,22,23,24,25,26,27,28,29,30,
+    31,32,33,34,35,36,37,38)
+pre_self <- "my_data/subject_"
+sum_max_att <- list()
+sum_reward <- list()
+accuracy <- list()
+num_choice <- list()
+performance <- list()
+acc_rew <- list()
+acc_pun <- list()
+data_tib <-data.frame(id = integer(),
+                      stay_pr = factor(levels = c("-1","1")),    
+                      out = double(),
+                      transition = double(),
+                      prevchosendiff = double())
+                      
+index_data <- data.frame(id = integer(),
+                       performance = double(),
+                       max_reward = double(),
+                       accuracy = double()
+)
+#-------------------------------------------------------------------------- Loop
+for (n in 1:num_sub){
+  sub <- subject_id[n]
+  #dir self
+  dir_self <- paste(pre_self, sub,"/data.mat", sep ="")
+  subject <- readMat(dir_self)
+  #choice self
+  ch <- subject$data[, , 1]$choice
+  ind_choice <- which(ch!=0)
+  choice <- ch[ind_choice]
+  len <- length(choice)
+  len_1 <- length(choice)-1
+  
+  #reward self
+  rew <- subject$data[, , 1]$reward
+  reward <- floor((rew[ind_choice] *100)/10-4)
+  new_reward <-reward[1:len_1]
+  
+  #reward probs
+  reward_probs <- subject$data[, , 1]$rewardProbs
+  first_column  <-  floor((reward_probs[ind_choice,,1][,1] *100)/10-4)
+  second_column  <-  floor((reward_probs[ind_choice,,2][,1] *100)/10-4)
+  column <- list(first_column, second_column)
+  rew_prob_dif <- vector("numeric", length = len_1)
+  
+  #state
+  st <- subject$data[, , 1]$state1
+  state <- st[ind_choice]
+  
+  #stay self
+  which_stay <- list()
+  stay <- (choice[1:(length(choice)-1)]) == choice[2:len]
+  
+  #transition
+  trans_logic <- state[1:len_1] == state[2:len]
+  same <- vector("numeric", length = len_1)
+  ind_f <- which(trans_logic == FALSE)
+  ind_t <- which(trans_logic == TRUE)
+  same[ind_f] <- -1                #different transition
+  same[ind_t] <- 1                #same transition
+  
+  #stay self
+  stay_logic <- as.numeric(stay)
+  for (j in 1: len_1){                           
+    if (stay[j] == TRUE){
+      which_stay[j] = 1
+    }
+    else{
+      which_stay[j] = -1
+    }
+  }
+  
+  max_rew  <-  0 #--------------------------------------------------- max reward
+  acc <- 0
+  ch_num <- 0
+  max_att <- list()
+  acc_p <- 0
+  acc_r <- 0
+  num_p <- 0
+  num_r <- 0
+  for(z in 1:len){
+    if(first_column[z] >= second_column[z]){
+      max_rew = first_column[z]
+    }
+    else{
+      max_rew = second_column[z]
+    }
+      
+    if (max_rew == reward[z]){#---------------------------------------- accuracy
+      acc = acc + 1
+    }
+    if(choice[z] > 0){
+      ch_num = ch_num + 1
+    }
+    max_att[z] <- max_rew
+    #acc after reward $ punishment
+    if (reward[z] < 0){
+      num_p <- num_p + 1
+      if (max_rew == reward[z]){
+        acc_p = acc_p + 1
+      }
+    }
+    if (reward[z] >= 0){
+      num_r = num_r + 1
+      if (max_rew == reward[z]){
+        acc_r = acc_r + 1
+      }
+    }
+    if(choice[z] == 1){#-----difference between chosen & not chosen reward prob
+      rew_prob_dif[z] = 
+        first_column[z] - second_column[z]
+    }
+    else if (choice[z] == 2){
+      rew_prob_dif[z] = 
+        second_column[z] - first_column[z]
+    }
+  }
+  sum_max_att[n] <- round(sum(unlist(max_att)), digits = 3)
+  sum_reward[n] <- sum(reward[1:len_1])
+  num_choice[n] <- ch_num
+  accuracy[n] <- round(acc / ch_num, digit = 3)
+  performance[n] <-  round(unlist(sum_reward[n]) / unlist(sum_max_att[n]), digits = 3)
+  acc_rew[n] <- round(acc_r / num_r, digit = 3)
+  acc_pun[n] <- round(acc_p / num_r, digit = 3)
+  # predictors' data frame 
+  stay_choice = factor(unlist(which_stay))
+  outcome_diff = round(rew_prob_dif[1:len_1], digits = 3)
+  
+  # predictors' table
+  tib <- data.frame(id = rep(sub,len_1),
+                    stay_pr = stay_choice,    
+                    out = new_reward,
+                    transition = same,
+                    prevchosendiff = outcome_diff     
+  )
+  nRow <- nrow(data_tib)
+  data_tib[(nRow + 1) : (nRow + len_1),] <- tib
+  #making a data frame of mb/mf indexes and ...
+  my_data <- data.frame(id = sub,            
+                        performance = performance[n],
+                        max_reward = sum_max_att[n],
+                        accuracy = accuracy[n]
+  )
+  nRow  <-  nrow(index_data)
+  index_data[nRow + 1, ] <- my_data
+  
+}
+```
+
+
+```{r}
+# SELF regression ----------------------------------------written by Kool et al.
+
+numrows = rep(0, length(unique(data_tib$id)))
+res = data.frame(subj = numrows, 
+                 mb_index = numrows, 
+                 mf_index = numrows,
+                 accuracy = numrows,
+                 difference_mb_mf = numrows)
+model <- glmer(stay_pr ~ transition*prevchosendiff*out + 
+                 (1 + transition*prevchosendiff*out | id), 
+               family='binomial', 
+               data=data_tib, 
+               control=glmerControl(optCtrl=list(maxfun=1000000)))
+
+print(summary(model))
+effectsize(model)
+
+subj_nums = unique(data_tib$id) 
+subject_id <-  
+  c(1,2,3,4,5,6,7,8,10,
+    11,12,13,14,15,16,18,19,20,
+    21,22,23,24,25,26,27,28,29,30,
+    31,32,33,34,35,36,37,38)
+for(s in 1:length(subj_nums)){
+  sub <- subject_id[s]
+  res[s,1] = sub
+  res[s,2] = coef(model)$id[s,4]
+  res[s,3] = coef(model)$id[s,6]
+  res[s,4] = unlist(accuracy[s])
+  res[s,5] = res[s,2]-res[s,3]
+}
+
+mb_index_S <- res$mb_index
+mf_index_S <- res$mf_index
+index_data$mb <- mb_index_S
+index_data$mf <- mf_index_S
+```
+
+
+```{r}
+#3-data frame for _____"OTHER"_____ stay probability
+#---------------------------------------------------------- define the variables
+num_sub <- 36
+subject_id <-  
+  c(1,2,3,4,5,6,7,8,10,
+    11,12,13,14,15,16,18,19,20,
+    21,22,23,24,25,26,27,28,29,30,
+    31,32,33,34,35,36,37,38)
+pre_other <- "my_data/subjectO_"
+sum_max_att_O <- list()
+sum_reward_O <- list()
+accuracy_O <- list()
+num_choice_O <- list()
+performance_O <- list()
+acc_rew_O <- list()
+acc_pun_O <- list()
+data_tib_O <-data.frame(id = integer(),
+                      stay_pr = factor(levels = c("-1","1")),    
+                      out = double(),
+                      transition = factor(levels = c("-1","1")),
+                      prevchosendiff = double())
+                      
+index_data_O <- data.frame(id = integer(),
+                       performance_O = double(),
+                       max_reward = double(),
+                       accuracy_O = double()
+)
+#-------------------------------------------------------------------------- Loop
+for (n in 1:num_sub){
+  sub <- subject_id[n]
+  #dir self
+  dir_other_O <- paste(pre_other, sub,"/data.mat", sep ="")
+  subject_O <- readMat(dir_other_O)
+  #choice self
+  ch <- subject_O$data[, , 1]$choice
+  ind_choice <- which(ch!=0)
+  choice <- ch[ind_choice]
+  len <- length(choice)
+  len_1 <- length(choice)-1
+  
+  #reward self
+  rew <- subject_O$data[, , 1]$reward
+  reward <- floor((rew[ind_choice] *100)/10-4)
+  new_reward <-reward[1:len_1]
+  
+  #reward probs
+  reward_probs <- subject_O$data[, , 1]$rewardProbs
+  first_column  <-  floor((reward_probs[ind_choice,,1][,1] *100)/10-4)
+  second_column  <-  floor((reward_probs[ind_choice,,2][,1] *100)/10-4)
+  column <- list(first_column, second_column)
+  rew_prob_dif <- vector("numeric", length = len_1)
+  
+  #state
+  st <- subject_O$data[, , 1]$state1
+  state <- st[ind_choice]
+  
+  #stay self
+  which_stay <- list()
+  stay <- (choice[1:(length(choice)-1)]) == choice[2:len]
+  
+  #transition
+  trans_logic <- state[1:len_1] == state[2:len]
+  same <- vector("numeric", length = len_1)
+  ind_f <- which(trans_logic == FALSE)
+  ind_t <- which(trans_logic == TRUE)
+  same[ind_f] <- -1                #different transition
+  same[ind_t] <- 1                #same transition
+  
+    #stay self
+  stay_logic <- as.numeric(stay)
+  for (j in 1: len_1){                           
+    if (stay[j] == TRUE){
+      which_stay[j] = 1
+    }
+    else{
+      which_stay[j] = -1
+    }
+  }
+  
+  max_rew  <-  0 #--------------------------------------------------- max reward
+  acc <- 0
+  ch_num <- 0
+  max_att <- list()
+  acc_p <- 0
+  acc_r <- 0
+  num_p <- 0
+  num_r <- 0
+  for(z in 1:len){
+    if(first_column[z] >= second_column[z]){
+      max_rew = first_column[z]
+    }
+    else{
+      max_rew = second_column[z]
+    }
+      
+    if (max_rew == reward[z]){#---------------------------------------- accuracy_O
+      acc = acc + 1
+    }
+    if(choice[z] > 0){
+      ch_num = ch_num + 1
+    }
+    max_att[z] <- max_rew
+    #acc after reward $ punishment
+    if (reward[z] < 0){
+      num_p <- num_p + 1
+      if (max_rew == reward[z]){
+        acc_p = acc_p + 1
+      }
+    }
+    if (reward[z] >= 0){
+      num_r = num_r + 1
+      if (max_rew == reward[z]){
+        acc_r = acc_r + 1
+      }
+    }
+    if(choice[z] == 1){#-----difference between chosen & not chosen reward prob
+      rew_prob_dif[z] = 
+        first_column[z] - second_column[z]
+    }
+    else if (choice[z] == 2){
+      rew_prob_dif[z] = 
+        second_column[z] - first_column[z]
+    }
+  }
+  sum_max_att_O[n] <- round(sum(unlist(max_att)), digits = 3)
+  sum_reward_O[n] <- sum(reward[1:len_1])
+  num_choice_O[n] <- ch_num
+  accuracy_O[n] <- round(acc / ch_num, digit = 3)
+  performance_O[n] <-  round(unlist(sum_reward_O[n]) / unlist(sum_max_att_O[n]), digits = 3)
+  acc_rew_O[n] <- round(acc_r / num_r, digit = 3)
+  acc_pun_O[n] <- round(acc_p / num_r, digit = 3)
+  # predictors' data frame 
+  stay_choice = factor(unlist(which_stay))
+  outcome_diff = round(rew_prob_dif[1:len_1], digits = 3)
+  
+  # predictors' table
+  tib_O <- data.frame(id = rep(sub,len_1),
+                    stay_pr = stay_choice,    
+                    out = new_reward,
+                    transition = same,
+                    prevchosendiff = outcome_diff     
+  )
+  nRow <- nrow(data_tib_O)
+  data_tib_O[(nRow + 1) : (nRow + len_1),] <- tib_O
+  #making a data frame of mb/mf indexes and ...
+  my_data_O <- data.frame(id = sub,         
+                          performance = performance_O[n],
+                          max_reward = sum_max_att_O[n],
+                          accuracy = accuracy_O[n]
+  )
+  nRow <-  nrow(index_data_O)
+  index_data_O[nRow + 1, ] <- my_data_O
+}
+
+```
+
+
+```{r}
+# OTHER ------------------------------------------------------- Kool's regression
+
+numrows = rep(0, length(unique(data_tib_O$id)))
+res_O = data.frame(subj = numrows, 
+                 mb_index=numrows, 
+                 mf_index=numrows,
+                 accuracy=numrows, 
+                 difference_mb_mf=numrows)
+
+model_O <- glmer(stay_pr ~ transition*prevchosendiff*out + 
+                 (1 + transition*prevchosendiff*out | id), 
+               family='binomial', 
+               data=data_tib_O, 
+               control=glmerControl(optCtrl=list(maxfun=1000000)))
+
+print(summary(model_O))
+
+subj_nums = unique(data_tib_O$id) 
+subject_id <-  
+  c(1,2,3,4,5,6,7,8,10,
+    11,12,13,14,15,16,18,19,20,
+    21,22,23,24,25,26,27,28,29,30,
+    31,32,33,34,35,36,37,38)
+for(s in 1:length(subj_nums)){
+  sub_O <- subject_id[s]
+  res_O[s,1] = sub_O
+  res_O[s,2] = coef(model_O)$id[s,4]
+  res_O[s,3] = coef(model_O)$id[s,6]
+  res_O[s,4] = unlist(accuracy_O[s])
+  res_O[s,5] = res_O[s,2]-res_O[s,3]
+}
+mb_index_O <- res_O$mb_index
+mf_index_O <- res_O$mf_index
+index_data_O$mb <- mb_index_O
+index_data_O$mf <- mf_index_O
+```
+
+
+```{r}
+# Associations--------------------------------------------- SELF
+my_plot <- GGally::ggscatmat(res, columns = c("mf_index", "mb_index", "accuracy" )) + 
+  theme_minimal(base_size = 18)
+#save plot
+ggsave('E:/uni/statistics/Learning-in-self-other-Decision-making/plot/Association_acc_self.png',
+       my_plot, device = "png", width = 10, height = 7, dpi = 300)
+#Pearson’s correlation 
+res %>%
+  dplyr::select(accuracy, mb_index, mf_index) %>%
+  correlation::correlation()
+# Associations--------------------------------------------- OTHER
+my_plot <- GGally::ggscatmat(res_O, columns = c("mf_index", "mb_index", "accuracy" )) + 
+  theme_minimal(base_size = 18)
+#save plot
+ggsave('E:/uni/statistics/Learning-in-self-other-Decision-making/plot/Association_acc_other.png',
+       my_plot, device = "png", width = 10, height = 7, dpi = 300)
+#Pearson’s correlation 
+res_O %>%
+  dplyr::select(accuracy, mb_index, mf_index) %>%
+  correlation::correlation()
+#pool---------------------------------------------------------------------------
+#data
+max_dat <-rbind(res, res_O)
+# Associations---------------------------------------------
+my_plot <- GGally::ggscatmat(max_dat, columns = c("mf_index", "mb_index", "accuracy" )) + 
+  theme_minimal(base_size = 18)
+#save plot
+ggsave('E:/uni/statistics/Learning-in-self-other-Decision-making/plot/Association_acc.png',
+       my_plot, device = "png", width = 10, height = 7, dpi = 300)
+#Pearson’s correlation 
+max_dat %>%
+  dplyr::select(accuracy, mb_index, mf_index) %>%
+  correlation::correlation()
+#plot
+my_plot <- ggplot2::ggplot(max_dat, aes(mb_index, accuracy)) +
+  geom_point(colour = "#2C5577",size = 3, alpha = 0.8) +
+  geom_smooth(method = "glm") +
+  labs(x = "MB index", y = "Accuracy") + #Maximum Attainable Reward
+  theme_minimal(base_size = 21) + 
+  theme(axis.line = element_line(colour = "black"),
+        axis.ticks.x.bottom = element_line(),
+        axis.ticks.y.left = element_line(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank())
+#save plot
+ggsave('E:/uni/statistics/Learning-in-self-other-Decision-making/plot/mb_acc.tif',
+       my_plot, device = "tiff", width = 18, height = 11, units = "cm", dpi = 300)
+#regression
+max_lm <- lm(accuracy ~ interaction, data = res_O) 
+summary(max_lm)
+#Pearson’s correlation 
+index_data %>%
+  dplyr::select(accuracy, mb_index) %>%
+  correlation::correlation()
+
+```
+
+
+```{r}
+# t.test -----------------------------------------------------------------------
+                              # ---------------- MB
+res_MB <- t.test(res$mb_index, res_O$mb_index, paired = TRUE)
+res_MB
+                              # ---------------- MF
+res_MF <- t.test(res$mf_index,res_O$mf_index, paired = TRUE)
+res_MF
+t.test(res_O$mb_index - res_O$mf_index, 
+       res$mb_index - res$mf_index,
+       paired = TRUE)
+```
+
+```{r}
+#GLM
+perf_lm <- lm(accuracy_O ~ mb, data = index_data_O, na.action = na.exclude)
+#Extracting model information with summary()
+summary(perf_lm)
+#Overall fit of the model`
+broom::glance(perf_lm)
+#Model parameters (1)
+broom::tidy(perf_lm, conf.int = TRUE)
+```
+
+```{r}
+#bar plot
+bar_tib <- tibble::tibble( 
+                id = rep(subject_id,4),
+                group = as.factor(rep(c("self", "other", "self", "other"), each = num_sub)),
+                strategy = as.factor(rep(c("MB", "MF"), each = num_sub * 2)),
+                index = unlist(c(mb_index_S, mb_index_O, mf_index_S,mf_index_O))
+                )
+
+#plot
+y <- bar_tib %>% ggplot(aes(strategy, index, fill = forcats::fct_rev(group)))+
+  scale_fill_grey(
+  start = 0.2,
+  end = 0.8,
+  na.value = "red",
+  aesthetics = "fill")+
+  stat_summary(fun = mean, geom = "bar", position = position_dodge2(padding = 0.2), width = 0.9) +
+  stat_summary(fun.data = mean_cl_normal, geom = "errorbar", position = position_dodge(width = 0.9), width = 0.1) +
+  labs(x = "Strategy", y = "MB and MF index", fill = "Group") +
+  scale_y_continuous(breaks = scales::breaks_width(0.2))+
+  geom_point(aes(y=index, group = group),
+             stat = "identity",
+             position = position_dodge(width = 0.9),
+             colour = "#2C5577",
+             alpha = .4,
+             size = 3) + 
+  theme_minimal(base_size = 21)+ 
+  theme(axis.line = element_line(colour = "black"),
+        axis.ticks.x.bottom = element_line(),
+        axis.ticks.y.left = element_line(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank())
+
+#save plot
+ggsave('E:/uni/statistics/Learning-in-self-other-Decision-making/plot/ind_reg.tif',
+       y, device = "tiff", width = 18, height = 11, units = "cm", dpi = 300)
+```
+
+```{r}
+index_tib <- tibble::tibble( 
+                id = rep(subject_id,2),
+                group = as.factor(rep(c("self", "other"), each = num_sub)),
+                perf = unlist(c(performance,  performance_O)),
+                acc = unlist(c(accuracy,  accuracy_O)),
+                mb_mf = c(mb_index_S - mf_index_S, mb_index_O - mf_index_O)
+                )
+index_tib
+```
+
+```{r}
+#the model: factorial repeated measure ANOVA
+reg_afx <- afex::aov_4(index ~ 
+                          group*strategy +
+                          ( group*strategy | id),
+                        data = bar_tib)
+ano_afx <- anova(reg_afx)
+emmeans::emmeans(reg_afx, ~ group, model = "multivariate")
+emmeans::emmeans(reg_afx, ~ strategy, model = "multivariate")
+stay_emm <- emmeans::emmeans(reg_afx, c("group", "strategy"), model = "multivariate")
+pairs(stay_emm, adjust = "holm")
+
+# R allows a shortcut for the prior definition
+m1 <- lm( acc ~ mb_mf * group, data=index_tib ) #multiple regression
+summary(m1)
+broom::glance(m1)
+broom::tidy(m1, conf.int = TRUE)
+
+index_tib <- index_tib %>%
+  dplyr::select( -matches('fit'), -matches('lwr'), -matches('upr') ) %>%
+  cbind( predict(m1, interval='conf') )
+# Make a nice plot that includes the regression line.
+ggplot(index_tib, aes(x = mb_mf, col = forcats::fct_rev(group), fill = forcats::fct_rev(group))) + 
+  geom_ribbon(aes(ymin = lwr, ymax = upr), alpha=.3) + 
+  labs(x = "mb - mf", y = "Performance", fill = "Group") +
+  geom_point(aes(y = acc)) +
+  geom_line(aes(y = fit)) +
+  
+  theme_minimal()
+
+ggplot2::ggplot(index_tib, aes(mb_mf, acc, colour = group)) +
+  geom_point() +
+  geom_smooth(method = "lm", aes(fill = group), alpha = 0.1) +
+  labs(x = "mb_mf", y = "performance", colour = "Group", fill = "Group") +
+  theme_minimal()
+#Plotting the interaction
+my_plot <- interactions::interact_plot(m1, pred = mb_mf, modx = group, plot.points = TRUE,point.size = 2, jitter = 0.1) +
+  labs(x = "MB - MF index", y = "Accuracy", fill =  "Group") +
+  
+  theme_minimal(base_size = 21)+
+  theme(axis.line = element_line(colour = "black"),
+        axis.ticks.x.bottom = element_line(),
+        axis.ticks.y.left = element_line(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank())
+#save plot
+ggsave('E:/uni/statistics/Learning-in-self-other-Decision-making/plot/multi_reg_perf.tif',
+       my_plot, device = "tiff", width = 18, height = 11, units = "cm", dpi = 300)
+#Glm
+perf_lm <- lm(acc ~ group, data = index_tib) 
+anova(perf_lm)
+```
+
+```{r}
+#regressed out
+reg_out_data <- tibble::tibble( 
+                id = rep(subject_id,2),
+                group = as.factor(rep(c("self", "other"), each = num_sub)),
+                perf = unlist(c(performance,  performance_O)),
+                acc = unlist(c(accuracy, accuracy_O)),
+                max_reward = c(unlist(sum_max_att), unlist(sum_max_att_O)),
+                mf_index = c (mf_index_S, mf_index_O),
+                mb_index = c (mb_index_S, mb_index_O)
+)
+write.csv(reg_out_data, "regression_results.csv")
+reg_out_lm <- lm(acc ~ max_reward * group , data = reg_out_data)
+reg_out_anco <- aov(acc ~ max_reward * group, data=reg_out_data)
+summary(reg_out_anco)
+summary(reg_out_lm)
+broom::tidy(reg_out_lm, conf.int = TRUE)
+```
+
