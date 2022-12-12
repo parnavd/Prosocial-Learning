@@ -1,0 +1,203 @@
+---
+title: "BFNE"
+author: "Paris.N"
+date: "11/16/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(here)
+library(tidyverse)
+make_z <- function(x){        #Using a function to compute z
+  (x - mean(x, na.rm = TRUE)) / sd(x, na.rm = TRUE)
+}
+# download bfne data
+bfne_tib <- here::here("my_data/BFNE-II.csv")%>%
+  readr::read_csv()
+bfne_tib[[5]][1:36]
+# make a dataset
+bfne_dat = data.frame(sub_id = as.character(bfne_tib$name),
+                      Q_1 = bfne_tib[[5]][1:35],
+                      Q_2 = bfne_tib[[6]][1:35],
+                      Q_3 = bfne_tib[[7]][1:35],
+                      Q_4 = bfne_tib[[8]][1:35],
+                      Q_5 = bfne_tib[[9]][1:35],
+                      Q_6 = bfne_tib[[10]][1:35],
+                      Q_7 = bfne_tib[[11]][1:35],
+                      Q_8 = bfne_tib[[12]][1:35])
+# add a sumation column
+bfne_dat$sum=rowSums(bfne_dat[,2:9])
+bfne_dat[1,1:9]
+bf_score <- bfne_dat$sum[-c(9, 20)]
+mb_bf_S <- index_data$mb[-c(19,29,36)]
+mf_bf_S <- index_data$mf[-c(19,29,36)]
+mb_bf_O <- index_data_O$mb[-c(19,29,36)]
+mf_bf_O <- index_data_O$mf[-c(19,29,36)]
+#---------------------------------------------------------------------- Outliers
+bfne_dat <- bfne_dat %>% 
+  dplyr::mutate(
+    bfne_z = make_z(bfne_dat$sum)
+  )
+#Using standardized scores to detect outliers  
+bfne_dat %>% 
+  dplyr::filter_at(
+    vars(bfne_z),
+    any_vars(. >= 2.58)
+  )
+```
+
+
+```{r}
+# table summary
+bfne_dat %>%
+  dplyr::summarise(
+    median =  median(bfne_dat$sum),
+    mean =  mean(bfne_dat$sum),
+    IQR = IQR(bfne_dat$sum),
+    variance = var(bfne_dat$sum),
+    std_dev = sd(bfne_dat$sum)
+    ) %>%
+    round(., 2)
+```
+
+
+```{r}
+#box plot
+ggplot(bfne_dat, aes(y=sum)) + 
+  geom_boxplot(outlier.colour="red", outlier.shape=8,outlier.size=4) 
+```
+
+```{r}
+#histogram
+my_plot <- ggplot2::ggplot(bfne_dat, aes(sum)) +
+  geom_histogram(binwidth = 2, fill = "#56B4E9", alpha = 0.5) +
+  labs(y = "Frequency", x = "social anxiety score") +
+  scale_x_continuous(breaks = scales::breaks_width(2))+
+  scale_y_continuous(limits = c(0, 8),breaks = scales::breaks_width(2))+
+  theme_minimal(base_size = 21)+
+  theme(axis.line = element_line(colour = "black"),
+        axis.ticks.x.bottom = element_line(),
+        axis.ticks.y.left = element_line(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank())
+ggsave('E:/uni/statistics/Learning-in-self-other-Decision-making/plot/hist_bfne.png',
+       my_plot, device = "png", width = 10, height = 7, dpi = 300)
+```
+
+
+```{r}
+# data frame for regression
+# first run the regression.Rmd!
+
+bf_reg_dat <- data.frame(sub_id =bfne_dat$sub_id[-c(9, 20)],
+                         bfne_score =bf_score,
+                         mf_mb_self =  mf_bf_S - mb_bf_S,
+                         mf_mb_other = mf_bf_O - mb_bf_O,
+                         mb_self = mb_bf_S,
+                         mf_self = mf_bf_S,
+                         mb_other = mb_bf_O,
+                         mf_other = mf_bf_O)
+bf_reg_dat
+```
+
+```{r}
+#Pearson’s correlation 
+bf_reg_dat %>%
+  dplyr::select(bfne_score, mb_self) %>%
+  correlation::correlation()
+```
+
+```{r}
+# model
+bf_lm <- lm(mb_self ~ bfne_score, data = bf_reg_dat)
+summary(bf_lm)
+broom::glance(bf_lm)
+broom::tidy(bf_lm, conf.int = TRUE)
+#plot
+my_plot <-  ggplot2::ggplot(bf_reg_dat, aes(bfne_score, mf_mb_self)) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  labs(x = "social anxietyn score"  , y = " MF - MB (self)") +
+  theme_minimal(base_size = 18)+
+  theme(axis.line = element_line(colour = "black"),
+        axis.ticks.x.bottom = element_line(),
+        axis.ticks.y.left = element_line(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank())
+#save plot
+ggsave('E:/uni/statistics/Learning-in-self-other-Decision-making/plot/bfne_mf_mb_self.png',
+       my_plot, device = "png", width = 18, height = 11, units = "cm", dpi = 300)
+
+```
+
+```{r}
+#multiple regression
+
+bf_self <- data.frame(sub_id = as.character(bf_reg_dat$sub_id),
+                      beneficiary = rep("self",length(bf_reg_dat$sub_id)),
+                      bfne_score = bf_reg_dat$bfne_score,
+                      mb_mf = bf_reg_dat$mb_mf_self
+                      )
+bf_other <- data.frame(sub_id = as.character(bf_reg_dat$sub_id),
+                      beneficiary = rep("other",length(bf_reg_dat$sub_id)),
+                      bfne_score = bf_reg_dat$bfne_score,
+                      mb_mf = bf_reg_dat$mb_mf_other)
+#------------------------------------------------- for m-fit
+bf_self <- data.frame(sub_id = as.character(bf_reg_dat$sub_id),
+                      beneficiary = rep("self",length(bf_reg_dat$sub_id)),
+                      bfne_score = bf_reg_dat$bfne_score,
+                      w = fit_self_dat$Mb_w[-c(19,29,36)],
+                      rew_rate = fit_self_dat$corctd_rew[-c(19,29,36)]
+                      )
+bf_other <- data.frame(sub_id = as.character(bf_reg_dat$sub_id),
+                      beneficiary = rep("other",length(bf_reg_dat$sub_id)),
+                      bfne_score = bf_reg_dat$bfne_score,
+                      w = fit_other_dat$Mb_w[-c(19,29,36)],
+                      rew_rate = fit_other_dat$corctd_rew[-c(19,29,36)])
+#----------------------------------------------------------------------------------
+#model
+bf_group <- rbind(bf_self,bf_other)
+bf_reg <- lm( w ~ bfne_score * beneficiary , data=bf_group )
+summary(bf_reg)
+broom::glance(bf_reg)
+broom::tidy(bf_reg, conf.int = TRUE)
+# save the fit, lwr, upr values for each observation
+# these are the yhat and CI 
+# If columns for fit, upr, lwr are already present, remove them
+bf_group <- bf_group %>%
+  dplyr::select( -matches('fit'), -matches('lwr'), -matches('upr') ) %>%
+  cbind( predict(bf_reg, interval='conf') )
+
+# Make a nice plot that includes the regression line.
+ggplot(bf_group, aes(x=bfne_score, col= forcats::fct_rev(beneficiary), fill= forcats::fct_rev(beneficiary))) + 
+  geom_ribbon(aes(ymin=lwr, ymax=upr),
+              alpha=.3) +   # how solid the layer is
+  geom_point(aes(y=mb_mf)) +
+  geom_line(aes(y=fit))+ 
+  
+  theme_minimal()
+  
+#Plotting the interaction
+my_plot <- interactions::interact_plot(bf_reg, pred = bfne_score, modx = beneficiary) +
+  labs(x = "social anxiety score", y = "mb - mf index", fill = "beneficiary") +
+  theme_minimal(base_size = 18)+
+  theme(axis.line = element_line(colour = "black"),
+        axis.ticks.x.bottom = element_line(),
+        axis.ticks.y.left = element_line(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank())
+ggsave('E:/uni/statistics/Learning-in-self-other-Decision-making/plot/bfne_inter.png',
+       my_plot, device = "png", width = 10, height = 7, dpi = 300)
+```
+```
+
