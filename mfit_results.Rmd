@@ -1,0 +1,260 @@
+---
+title: "mf_result"
+author: "Paris.N"
+date: "8/14/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(here)
+library(tidyverse)
+# download bfne data
+mfit_self <- readr::read_csv("my_data/MB and MF Modeling results-Self.csv")
+  
+mfit_other <- readr::read_csv("my_data/MB and MF Modeling results-Other.csv")
+  
+mfit_self <- na.omit(data.frame(mfit_self))
+mfit_other <- na.omit(data.frame(mfit_other))
+# selected data
+#--------------------------------------------------------------------Self
+fit_self_dat <- data.frame(ID = mfit_self$ID,
+                           Mb_w = mfit_self$weight,
+                           Mf_w = 1 -  mfit_self$weight,
+                           W_reg = mfit_self$w_reg,
+                           accuracy = index_data$accuracy,
+                           performance = index_data$performance,
+                           corctd_rew = unlist(sum_corctd_rew))
+#-------------------------------------------------------------------Other
+fit_other_dat <- data.frame(ID = mfit_other$ID,
+                           Mb_w = mfit_other$weight,
+                           Mf_w = 1 -  mfit_other$weight,
+                           W_reg = mfit_other$w_reg,
+                           accuracy = index_data_O$accuracy,
+                           performance = index_data_O$performance,
+                           corctd_rew = unlist(sum_corctd_rew_O))
+
+```
+
+
+```{r}
+# t.test
+ttest_mfit <- t.test(fit_self_dat$Mb_w, fit_other_dat$Mb_w, paired = TRUE)
+#-----------------------------------------------------------------------
+#Pearson’s correlation 
+fit_self_dat %>%
+  dplyr::select(Mb_w, corctd_rew) %>%
+  correlation::correlation()
+# plot Associations--------------------------------------------- SELF
+my_plot <- GGally::ggscatmat(fit_self_dat, columns = c("Mb_w", "Mf_w", "accuracy" )) + 
+  theme_minimal(base_size = 18)
+#save plot
+ggsave('E:/uni/statistics/Learning-in-self-other-Decision-making/plot/Association_acc_self.png',
+       my_plot, device = "png", width = 10, height = 7, dpi = 300)
+#Pearson’s correlation 
+fit_self_dat %>%
+  dplyr::select(accuracy, Mb_w, Mf_w) %>%
+  correlation::correlation()
+#---------------------------------------------------------------------
+#GLM
+lm_fit <- lm(corctd_rew ~ Mb_w, data = fit_self_dat, na.action = na.exclude)
+#Extracting model information with summary()
+summary(lm_fit)
+#Overall fit of the model`
+broom::glance(lm_fit)
+#Model parameters (1)
+broom::tidy(lm_fit, conf.int = TRUE)
+#------------------------------------------------------------------------
+#cor_ w / mb_reg
+pool_fit_dat <- rbind(fit_self_dat, fit_other_dat)
+pool_fit_dat$beneficiary  <-  as.factor(rep(c("self", "other"), each = num_sub))
+#Pearson’s correlation 
+pool_fit_dat %>%
+  dplyr::select(Mb_w, W_reg) %>%
+  correlation::correlation()
+#-----------------------------------------------------------------------
+```
+
+
+```{r}
+fit_tib <- tibble::tibble( 
+                id = rep(fit_self_dat$ID,2),
+                group = as.factor(rep(c("self", "other"), each = num_sub)),
+                MB = unlist(c(fit_self_dat$Mb_w,  fit_other_dat$Mb_w)),
+                MF = unlist(c(fit_self_dat$Mf_w,  fit_other_dat$Mf_w)),
+                acc = unlist(c(fit_self_dat$accuracy,  fit_other_dat$accuracy)),
+                reward_rate = unlist(c(fit_self_dat$corctd_rew, fit_other_dat$corctd_rew))
+                )
+```
+
+
+```{r}
+#plot mb-mf index
+#bar plot
+bar_tib_fit <- tibble::tibble( 
+                id = rep(subject_id,4),
+                group = as.factor(rep(c("self", "other", "self", "other"), each = num_sub)),
+                strategy = as.factor(rep(c("mb", "mf"), each = num_sub * 2)),
+                index = unlist(c(fit_self_dat$Mb_w,
+                                 fit_other_dat$Mb_w, fit_self_dat$Mf_w,  fit_other_dat$Mf_w )) 
+                )
+#plot
+my_plot <- bar_tib_fit %>% ggplot(aes(strategy, index, fill = forcats::fct_rev(group)))+ 
+  stat_summary(fun = mean, geom = "bar", position = position_dodge2(padding = 0.2), width = 0.9) +
+  stat_summary(fun.data = mean_cl_normal, geom = "errorbar", position = position_dodge(width = 0.9), width = 0.1) +
+  labs(x = "Strategy", y = "mb & mf index", fill = "Group") +
+  scale_y_continuous(breaks = scales::breaks_width(0.1))+
+  geom_point(aes(y=index, group = group),
+             stat = "identity",
+             position = position_dodge(width = 0.9),
+             colour = "#2C5577",
+             alpha = .5,
+             size = 3) + 
+  theme_minimal(base_size = 21)+ 
+  theme(axis.line = element_line(colour = "black"),
+        axis.ticks.x.bottom = element_line(),
+        axis.ticks.y.left = element_line(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank())
+#---------------------------------------------------------------------------
+#boxplot
+my_plot <- ggplot2::ggplot(bar_tib_fit, aes(x = strategy, y = index,
+                                        fill = forcats::fct_rev(group))) +
+  labs(x = "Strategy", y = "Index", fill = "Group") +
+  geom_boxplot() +
+  theme_minimal(base_size = 21) +
+  theme(axis.line = element_line(colour = "black"),
+        axis.ticks.x.bottom = element_line(),
+        axis.ticks.y.left = element_line(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank())
+```
+
+```{r}
+# R allows a shortcut for the prior definition
+m1 <- lm(acc ~ MB * group, data=fit_tib) #multiple regression 
+summary(m1)
+broom::glance(m1)
+broom::tidy(m1, conf.int = TRUE)
+
+# Make a nice plot that includes the regression line.
+my_plot <- ggplot2::ggplot(fit_tib, aes(MB, reward_rate, colour = forcats::fct_rev(group))) +
+  scale_y_continuous(breaks = scales::breaks_width(0.4))+
+  geom_point(aes(y=reward_rate, group = group),
+             stat = "identity",
+             alpha = .5,
+             size = 3) +
+  geom_smooth(method = "lm", aes(fill = forcats::fct_rev(group)), alpha = 0.3) +
+  labs(x = "Weighting parameter", y = "Reward rate (corrected)", colour = "Group", fill = "Group") +
+  theme_minimal(base_size = 28)+
+  theme(axis.line = element_line(colour = "black"),
+        axis.ticks.x.bottom = element_line(),
+        plot.title = element_text(size = 18, face = "bold"),
+        legend.title=element_text(size=18), 
+        legend.text=element_text(size=16),
+        axis.ticks.y.left = element_line(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank()
+        )
+#save plot
+ggsave('E:/uni/statistics/Learning-in-self-other-Decision-making/plot/w_rew.tif',
+       my_plot, device = "tiff", width = 10, height = 7, dpi = 300)
+```
+
+```{r}
+# corrected reward
+#bar plot table------------------------------------------------------------
+bar_tib_fit <- tibble::tibble(
+                id = rep(subject_id,2),
+                group = as.factor(rep(c("self", "other"), each = num_sub)),
+                index = unlist(c(fit_self_dat$Mb_w, fit_other_dat$Mb_w)),
+                reward_rate = unlist(c(fit_self_dat$corctd_rew, fit_other_dat$corctd_rew))
+                )
+#plot
+y <- bar_tib_fit %>% ggplot(aes(forcats::fct_rev(group),index, fill = forcats::fct_rev(group)))+
+  stat_summary(fun = mean, geom = "bar", position = position_dodge2(padding = 0.4), width = 0.5) +
+  stat_summary(fun.data = mean_cl_normal, geom = "errorbar", position = position_dodge(width = 0.9), width = 0.1) +
+  labs(x = "Beneficiary", y = "Weighting parameter", fill = "Group") +
+  scale_y_continuous(limits = c(0, 1),breaks = scales::breaks_width(0.4))+
+  geom_point(aes(y=index, group = group),
+             stat = "identity",
+             position = position_dodge(width = 0.9),
+             colour = "#2C5577",
+             alpha = .5,
+             size = 3) +
+  geom_line(aes(group = id), colour = "#2C5577", alpha = 0.5, ) +
+  theme_minimal(base_size = 28)+
+  theme(axis.line = element_line(colour = "black"),
+        axis.ticks.x.bottom = element_line(),
+        axis.ticks.y.left = element_line(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank())
+#save plot
+ggsave('E:/uni/statistics/Learning-in-self-other-Decision-making/plot/bar_w.tif',
+       y, device = "tiff", width = 15, height = 18, units = "cm", dpi = 300)
+#---------------------------------------------------------------------------
+#boxplot
+y <- ggplot2::ggplot(bar_tib_fit, aes(x = group, y = index,
+                                        fill = forcats::fct_rev(group))) +
+
+  labs(x = "Beneficiary", y = "Weighting parameter", fill = "Group") +
+  geom_boxplot( position = position_dodge2(padding = 0.2), width = 0.6) +
+  geom_point(aes(y=index, group = group),
+             stat = "identity",
+             position = position_dodge(width = 0.9),
+             colour = "#2C5577",
+             alpha = .5,
+             size = 3) + 
+  theme_minimal(base_size = 24)+
+  theme(axis.line = element_line(colour = "black"),
+        axis.ticks.x.bottom = element_line(),
+        axis.ticks.y.left = element_line(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank())
+#---------------------------------------------------------------------------
+# model
+bf_lm <- lm(reward_rate ~ MB * group, data = fit_tib)
+summary(bf_lm)
+broom::glance(bf_lm)
+broom::tidy(bf_lm, conf.int = TRUE)
+#plot
+my_plot <-  ggplot2::ggplot(fit_tib, aes(MB, reward_rate)) +
+  geom_point() +
+  geom_smooth(method = "lm") +
+  labs(x = "Weighting parameter"  , y = "Reward rate (corrected)") +
+  theme_minimal(base_size = 21)+
+  theme(axis.line = element_line(colour = "black"),
+        axis.ticks.x.bottom = element_line(),
+        axis.ticks.y.left = element_line(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank())
+#Plotting the interaction
+my_plot <- interactions::interact_plot(bf_lm, pred = MB, modx = group) +
+  labs(x = "Weighting parameter", y = "Reward rate (corrected)", fill = "Group") +
+  theme_minimal(base_size = 21)+
+  theme(axis.line = element_line(colour = "black"),
+        axis.ticks.x.bottom = element_line(),
+        axis.ticks.y.left = element_line(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_blank(),
+        panel.background = element_blank())
+#save plot
+ggsave('E:/uni/statistics/Learning-in-self-other-Decision-making/plot/bar_w.png',
+       y, device = "png", width = 13, height = 18, units = "cm", dpi = 300)
+```
