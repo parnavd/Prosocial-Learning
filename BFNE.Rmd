@@ -12,9 +12,6 @@ knitr::opts_chunk$set(echo = TRUE)
 ```{r}
 library(here)
 library(tidyverse)
-make_z <- function(x){        #Using a function to compute z
-  (x - mean(x, na.rm = TRUE)) / sd(x, na.rm = TRUE)
-}
 # download bfne data
 bfne_tib <- here::here("my_data/BFNE-II.csv")%>%
   readr::read_csv()
@@ -38,16 +35,7 @@ mf_bf_S <- index_data$mf[-c(19,29,36)]
 mb_bf_O <- index_data_O$mb[-c(19,29,36)]
 mf_bf_O <- index_data_O$mf[-c(19,29,36)]
 #---------------------------------------------------------------------- Outliers
-bfne_dat <- bfne_dat %>% 
-  dplyr::mutate(
-    bfne_z = make_z(bfne_dat$sum)
-  )
-#Using standardized scores to detect outliers  
-bfne_dat %>% 
-  dplyr::filter_at(
-    vars(bfne_z),
-    any_vars(. >= 2.58)
-  )
+
 ```
 
 
@@ -64,12 +52,6 @@ bfne_dat %>%
     round(., 2)
 ```
 
-
-```{r}
-#box plot
-ggplot(bfne_dat, aes(y=sum)) + 
-  geom_boxplot(outlier.colour="red", outlier.shape=8,outlier.size=4) 
-```
 
 ```{r}
 #histogram
@@ -198,6 +180,5 @@ my_plot <- interactions::interact_plot(bf_reg, pred = bfne_score, modx = benefic
         panel.background = element_blank())
 ggsave('E:/uni/statistics/Learning-in-self-other-Decision-making/plot/bfne_inter.png',
        my_plot, device = "png", width = 10, height = 7, dpi = 300)
-```
 ```
 
